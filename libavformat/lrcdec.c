@@ -185,6 +185,8 @@ static int lrc_read_header(AVFormatContext *s)
                    sscanf(comma_offset + 1, "%"SCNd64, &lrc->ts_offset) != 1) {
                     av_dict_set(&s->metadata, line.str + 1, comma_offset + 1, 0);
                 }
+                lrc->ts_offset = av_clip64(lrc->ts_offset, INT64_MIN/4, INT64_MAX/4);
+
                 *comma_offset = ':';
                 *right_bracket_offset = ']';
             }
@@ -198,13 +200,12 @@ static int lrc_read_header(AVFormatContext *s)
 
             while((ts_stroffset_incr = read_ts(line.str + ts_stroffset,
                                                &ts_start)) != 0) {
+                ts_start = av_clip64(ts_start, INT64_MIN/4, INT64_MAX/4);
                 ts_stroffset += ts_stroffset_incr;
                 sub = ff_subtitles_queue_insert(&lrc->q, line.str + ts_strlength,
                                                 line.len - ts_strlength, 0);
-                if(!sub) {
-                    ff_subtitles_queue_clean(&lrc->q);
+                if (!sub)
                     return AVERROR(ENOMEM);
-                }
                 sub->pos = pos;
                 sub->pts = ts_start - lrc->ts_offset;
                 sub->duration = -1;
@@ -238,10 +239,11 @@ static int lrc_read_close(AVFormatContext *s)
     return 0;
 }
 
-AVInputFormat ff_lrc_demuxer = {
+const AVInputFormat ff_lrc_demuxer = {
     .name           = "lrc",
     .long_name      = NULL_IF_CONFIG_SMALL("LRC lyrics"),
     .priv_data_size = sizeof (LRCContext),
+    .flags_internal = FF_FMT_INIT_CLEANUP,
     .read_probe     = lrc_probe,
     .read_header    = lrc_read_header,
     .read_packet    = lrc_read_packet,

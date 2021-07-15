@@ -148,6 +148,10 @@ static int subviewer_read_header(AVFormatContext *s)
             new_event = 1;
             pos = avio_tell(s->pb);
         } else if (*line) {
+            if (pts_start == AV_NOPTS_VALUE) {
+                res = AVERROR_INVALIDDATA;
+                goto end;
+            }
             if (!new_event) {
                 sub = ff_subtitles_queue_insert(&subviewer->q, "\n", 1, 1);
                 if (!sub) {
@@ -172,8 +176,6 @@ static int subviewer_read_header(AVFormatContext *s)
     ff_subtitles_queue_finalize(s, &subviewer->q);
 
 end:
-    if (res < 0)
-        ff_subtitles_queue_clean(&subviewer->q);
     av_bprint_finalize(&header, NULL);
     return res;
 }
@@ -199,10 +201,11 @@ static int subviewer_read_close(AVFormatContext *s)
     return 0;
 }
 
-AVInputFormat ff_subviewer_demuxer = {
+const AVInputFormat ff_subviewer_demuxer = {
     .name           = "subviewer",
     .long_name      = NULL_IF_CONFIG_SMALL("SubViewer subtitle format"),
     .priv_data_size = sizeof(SubViewerContext),
+    .flags_internal = FF_FMT_INIT_CLEANUP,
     .read_probe     = subviewer_probe,
     .read_header    = subviewer_read_header,
     .read_packet    = subviewer_read_packet,

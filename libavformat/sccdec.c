@@ -65,7 +65,6 @@ static int scc_read_header(AVFormatContext *s)
     AVStream *st = avformat_new_stream(s, NULL);
     char line2[4096], line[4096];
     int64_t pos, ts, next_ts = AV_NOPTS_VALUE;
-    int ret = 0;
     ptrdiff_t len;
     uint8_t out[4096];
     FFTextReader tr;
@@ -94,7 +93,7 @@ static int scc_read_header(AVFormatContext *s)
                     break;
             }
 
-            ts = (hh * 3600LL + mm * 60LL + ss) * 1000LL + fs * 33;
+            ts = (hh * 3600LL + mm * 60LL + ss) * 1000LL + fs * 33LL;
 
             while (!ff_text_eof(&tr)) {
                 len = ff_subtitles_read_line(&tr, line2, sizeof(line2));
@@ -118,7 +117,7 @@ static int scc_read_header(AVFormatContext *s)
             }
         }
 
-        next_ts = (hh * 3600LL + mm * 60LL + ss) * 1000LL + fs * 33;
+        next_ts = (hh * 3600LL + mm * 60LL + ss) * 1000LL + fs * 33LL;
 
         pos = ff_text_pos(&tr);
         lline = (char *)&line;
@@ -146,7 +145,7 @@ static int scc_read_header(AVFormatContext *s)
 
                 sub = ff_subtitles_queue_insert(&scc->q, out, i, 0);
                 if (!sub)
-                    goto fail;
+                    return AVERROR(ENOMEM);
 
                 sub->pos = pos;
                 pos += i;
@@ -165,7 +164,7 @@ static int scc_read_header(AVFormatContext *s)
 
         sub = ff_subtitles_queue_insert(&scc->q, out, i, 0);
         if (!sub)
-            goto fail;
+            return AVERROR(ENOMEM);
 
         sub->pos = pos;
         sub->pts = ts;
@@ -175,10 +174,7 @@ static int scc_read_header(AVFormatContext *s)
 
     ff_subtitles_queue_finalize(s, &scc->q);
 
-    return ret;
-fail:
-    ff_subtitles_queue_clean(&scc->q);
-    return AVERROR(ENOMEM);
+    return 0;
 }
 
 static int scc_read_packet(AVFormatContext *s, AVPacket *pkt)
@@ -202,10 +198,11 @@ static int scc_read_close(AVFormatContext *s)
     return 0;
 }
 
-AVInputFormat ff_scc_demuxer = {
+const AVInputFormat ff_scc_demuxer = {
     .name           = "scc",
     .long_name      = NULL_IF_CONFIG_SMALL("Scenarist Closed Captions"),
     .priv_data_size = sizeof(SCCContext),
+    .flags_internal = FF_FMT_INIT_CLEANUP,
     .read_probe     = scc_probe,
     .read_header    = scc_read_header,
     .read_packet    = scc_read_packet,

@@ -40,20 +40,13 @@
  * data instead of calling the protocol seek function, for seekable
  * protocols.
  */
-#define SHORT_SEEK_THRESHOLD 4096
+#define SHORT_SEEK_THRESHOLD 32768
 
 static void *ff_avio_child_next(void *obj, void *prev)
 {
     AVIOContext *s = obj;
     return prev ? NULL : s->opaque;
 }
-
-#if FF_API_CHILD_CLASS_NEXT
-static const AVClass *ff_avio_child_class_next(const AVClass *prev)
-{
-    return prev ? NULL : &ffurl_context_class;
-}
-#endif
 
 static const AVClass *child_class_iterate(void **iter)
 {
@@ -76,9 +69,6 @@ const AVClass ff_avio_class = {
     .version    = LIBAVUTIL_VERSION_INT,
     .option     = ff_avio_options,
     .child_next = ff_avio_child_next,
-#if FF_API_CHILD_CLASS_NEXT
-    .child_class_next = ff_avio_child_class_next,
-#endif
     .child_class_iterate = child_class_iterate,
 };
 
@@ -283,13 +273,9 @@ int64_t avio_seek(AVIOContext *s, int64_t offset, int whence)
     if (offset < 0)
         return AVERROR(EINVAL);
 
-    if (s->short_seek_get) {
-        short_seek = s->short_seek_get(s->opaque);
-        /* fallback to default short seek */
-        if (short_seek <= 0)
-            short_seek = s->short_seek_threshold;
-    } else
-        short_seek = s->short_seek_threshold;
+    short_seek = s->short_seek_threshold;
+    if (s->short_seek_get)
+        short_seek = FFMAX(s->short_seek_get(s->opaque), short_seek);
 
     offset1 = offset - pos; // "offset1" is the relative offset from the beginning of s->buffer
     s->buf_ptr_max = FFMAX(s->buf_ptr_max, s->buf_ptr);
@@ -523,14 +509,7 @@ static int read_packet_wrapper(AVIOContext *s, uint8_t *buf, int size)
     if (!s->read_packet)
         return AVERROR(EINVAL);
     ret = s->read_packet(s->opaque, buf, size);
-#if FF_API_OLD_AVIO_EOF_0
-    if (!ret && !s->max_packet_size) {
-        av_log(NULL, AV_LOG_WARNING, "Invalid return value 0 for stream protocol\n");
-        ret = AVERROR_EOF;
-    }
-#else
     av_assert2(ret || s->max_packet_size);
-#endif
     return ret;
 }
 
@@ -540,7 +519,7 @@ static void fill_buffer(AVIOContext *s)
 {
     int max_buffer_size = s->max_packet_size ?
                           s->max_packet_size : IO_BUFFER_SIZE;
-    uint8_t *dst        = s->buf_end - s->buffer + max_buffer_size < s->buffer_size ?
+    uint8_t *dst        = s->buf_end - s->buffer + max_buffer_size <= s->buffer_size ?
                           s->buf_end : s->buffer;
     int len             = s->buffer_size - (dst - s->buffer);
 
@@ -686,9 +665,11 @@ int avio_read(AVIOContext *s, unsigned char *buf, int size)
 int ffio_read_size(AVIOContext *s, unsigned char *buf, int size)
 {
     int ret = avio_read(s, buf, size);
-    if (ret != size)
-        return AVERROR_INVALIDDATA;
-    return ret;
+    if (ret == size)
+        return ret;
+    if (ret < 0 && ret != AVERROR_EOF)
+        return ret;
+    return AVERROR_INVALIDDATA;
 }
 
 int ffio_read_indirect(AVIOContext *s, unsigned char *buf, int size, const unsigned char **data)
@@ -719,13 +700,6 @@ int avio_read_partial(AVIOContext *s, unsigned char *buf, int size)
 
     len = s->buf_end - s->buf_ptr;
     if (len == 0) {
-        /* Reset the buf_end pointer to the start of the buffer, to make sure
-         * the fill_buffer call tries to read as much data as fits into the
-         * full buffer, instead of just what space is left after buf_end.
-         * This avoids returning partial packets at the end of the buffer,
-         * for packet based inputs.
-         */
-        s->buf_end = s->buf_ptr = s->buffer;
         fill_buffer(s);
         len = s->buf_end - s->buf_ptr;
     }
@@ -938,6 +912,11 @@ int ffio_fdopen(AVIOContext **s, URLContext *h)
     } else {
         buffer_size = IO_BUFFER_SIZE;
     }
+    if (!(h->flags & AVIO_FLAG_WRITE) && h->is_streamed) {
+        if (buffer_size > INT_MAX/2)
+            return AVERROR(EINVAL);
+        buffer_size *= 2;
+    }
     buffer = av_malloc(buffer_size);
     if (!buffer)
         return AVERROR(ENOMEM);
@@ -991,32 +970,46 @@ URLContext* ffio_geturlcontext(AVIOContext *s)
         return NULL;
 }
 
+static void update_checksum(AVIOContext *s)
+{
+    if (s->update_checksum && s->buf_ptr > s->checksum_ptr) {
+        s->checksum = s->update_checksum(s->checksum, s->checksum_ptr,
+                                         s->buf_ptr - s->checksum_ptr);
+    }
+}
+
 int ffio_ensure_seekback(AVIOContext *s, int64_t buf_size)
 {
     uint8_t *buffer;
     int max_buffer_size = s->max_packet_size ?
                           s->max_packet_size : IO_BUFFER_SIZE;
-    int filled = s->buf_end - s->buffer;
-    ptrdiff_t checksum_ptr_offset = s->checksum_ptr ? s->checksum_ptr - s->buffer : -1;
+    ptrdiff_t filled = s->buf_end - s->buf_ptr;
 
-    buf_size += s->buf_ptr - s->buffer + max_buffer_size;
+    if (buf_size <= s->buf_end - s->buf_ptr)
+        return 0;
 
-    if (buf_size < filled || s->seekable || !s->read_packet)
+    buf_size += max_buffer_size - 1;
+
+    if (buf_size + s->buf_ptr - s->buffer <= s->buffer_size || s->seekable || !s->read_packet)
         return 0;
     av_assert0(!s->write_flag);
 
-    buffer = av_malloc(buf_size);
-    if (!buffer)
-        return AVERROR(ENOMEM);
-
-    memcpy(buffer, s->buffer, filled);
-    av_free(s->buffer);
-    s->buf_ptr = buffer + (s->buf_ptr - s->buffer);
-    s->buf_end = buffer + (s->buf_end - s->buffer);
-    s->buffer = buffer;
-    s->buffer_size = buf_size;
-    if (checksum_ptr_offset >= 0)
-        s->checksum_ptr = s->buffer + checksum_ptr_offset;
+    if (buf_size <= s->buffer_size) {
+        update_checksum(s);
+        memmove(s->buffer, s->buf_ptr, filled);
+    } else {
+        buffer = av_malloc(buf_size);
+        if (!buffer)
+            return AVERROR(ENOMEM);
+        update_checksum(s);
+        memcpy(buffer, s->buf_ptr, filled);
+        av_free(s->buffer);
+        s->buffer = buffer;
+        s->buffer_size = buf_size;
+    }
+    s->buf_ptr = s->buffer;
+    s->buf_end = s->buffer + filled;
+    s->checksum_ptr = s->buffer;
     return 0;
 }
 

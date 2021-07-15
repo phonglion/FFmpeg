@@ -294,7 +294,7 @@ static void double_threshold(int low, int high, int w, int h,
                 continue;
             }
 
-            if ((!i || i == w - 1 || !j || j == h - 1) &&
+            if (!(!i || i == w - 1 || !j || j == h - 1) &&
                 src[i] > low &&
                 (src[-src_linesize + i-1] > high ||
                  src[-src_linesize + i  ] > high ||
@@ -431,7 +431,7 @@ static const AVFilterPad edgedetect_outputs[] = {
     { NULL }
 };
 
-AVFilter ff_vf_edgedetect = {
+const AVFilter ff_vf_edgedetect = {
     .name          = "edgedetect",
     .description   = NULL_IF_CONFIG_SMALL("Detect and draw edge."),
     .priv_size     = sizeof(EdgeDetectContext),

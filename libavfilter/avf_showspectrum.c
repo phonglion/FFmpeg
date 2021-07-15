@@ -355,20 +355,20 @@ static int query_formats(AVFilterContext *ctx)
 
     /* set input audio formats */
     formats = ff_make_format_list(sample_fmts);
-    if ((ret = ff_formats_ref(formats, &inlink->out_formats)) < 0)
+    if ((ret = ff_formats_ref(formats, &inlink->outcfg.formats)) < 0)
         return ret;
 
     layouts = ff_all_channel_layouts();
-    if ((ret = ff_channel_layouts_ref(layouts, &inlink->out_channel_layouts)) < 0)
+    if ((ret = ff_channel_layouts_ref(layouts, &inlink->outcfg.channel_layouts)) < 0)
         return ret;
 
     formats = ff_all_samplerates();
-    if ((ret = ff_formats_ref(formats, &inlink->out_samplerates)) < 0)
+    if ((ret = ff_formats_ref(formats, &inlink->outcfg.samplerates)) < 0)
         return ret;
 
     /* set output video format */
     formats = ff_make_format_list(pix_fmts);
-    if ((ret = ff_formats_ref(formats, &outlink->in_formats)) < 0)
+    if ((ret = ff_formats_ref(formats, &outlink->incfg.formats)) < 0)
         return ret;
 
     return 0;
@@ -1526,7 +1526,7 @@ static const AVFilterPad showspectrum_outputs[] = {
     { NULL }
 };
 
-AVFilter ff_avf_showspectrum = {
+const AVFilter ff_avf_showspectrum = {
     .name          = "showspectrum",
     .description   = NULL_IF_CONFIG_SMALL("Convert input audio to a spectrum video output."),
     .uninit        = uninit,
@@ -1709,7 +1709,7 @@ static const AVFilterPad showspectrumpic_outputs[] = {
     { NULL }
 };
 
-AVFilter ff_avf_showspectrumpic = {
+const AVFilter ff_avf_showspectrumpic = {
     .name          = "showspectrumpic",
     .description   = NULL_IF_CONFIG_SMALL("Convert input audio to a spectrum video output single picture."),
     .uninit        = uninit,

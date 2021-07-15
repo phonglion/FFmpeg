@@ -144,7 +144,7 @@ static int gif_read_header(AVFormatContext *s)
                 AVBPrint bp;
                 int block_size;
 
-                av_bprint_init(&bp, 0, -1);
+                av_bprint_init(&bp, 0, AV_BPRINT_SIZE_UNLIMITED);
                 while ((block_size = avio_r8(pb)) != 0) {
                     avio_read_to_bprint(pb, &bp, block_size);
                 }
@@ -397,7 +397,7 @@ static const AVClass demuxer_class = {
     .category   = AV_CLASS_CATEGORY_DEMUXER,
 };
 
-AVInputFormat ff_gif_demuxer = {
+const AVInputFormat ff_gif_demuxer = {
     .name           = "gif",
     .long_name      = NULL_IF_CONFIG_SMALL("CompuServe Graphics Interchange Format (GIF)"),
     .priv_data_size = sizeof(GIFDemuxContext),

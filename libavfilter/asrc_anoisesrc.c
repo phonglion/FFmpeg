@@ -101,7 +101,7 @@ static av_cold int query_formats(AVFilterContext *ctx)
     if (ret < 0)
         return ret;
 
-    layouts = avfilter_make_format64_list(chlayouts);
+    layouts = ff_make_format64_list(chlayouts);
     if (!layouts)
         return AVERROR(ENOMEM);
     ret = ff_set_common_channel_layouts(ctx, layouts);
@@ -246,7 +246,7 @@ static const AVFilterPad anoisesrc_outputs[] = {
     { NULL }
 };
 
-AVFilter ff_asrc_anoisesrc = {
+const AVFilter ff_asrc_anoisesrc = {
     .name          = "anoisesrc",
     .description   = NULL_IF_CONFIG_SMALL("Generate a noise audio signal."),
     .query_formats = query_formats,

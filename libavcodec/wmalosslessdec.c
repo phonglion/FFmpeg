@@ -26,6 +26,7 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/avassert.h"
+#include "libavutil/mem_internal.h"
 
 #include "avcodec.h"
 #include "internal.h"
@@ -758,7 +759,8 @@ static void lms_update ## bits (WmallDecodeCtx *s, int ich, int ilms, int input)
 static void revert_cdlms ## bits (WmallDecodeCtx *s, int ch, \
                                   int coef_begin, int coef_end) \
 { \
-    int icoef, pred, ilms, num_lms, residue, input; \
+    int icoef, ilms, num_lms, residue, input; \
+    unsigned pred;\
  \
     num_lms = s->cdlms_ttl[ch]; \
     for (ilms = num_lms - 1; ilms >= 0; ilms--) { \
@@ -772,7 +774,7 @@ static void revert_cdlms ## bits (WmallDecodeCtx *s, int ch, \
                                                         s->cdlms[ch][ilms].recent, \
                                                         FFALIGN(s->cdlms[ch][ilms].order, ROUND), \
                                                         WMASIGN(residue)); \
-            input = residue + (unsigned)(pred >> s->cdlms[ch][ilms].scaling); \
+            input = residue + (unsigned)((int)pred >> s->cdlms[ch][ilms].scaling); \
             lms_update ## bits(s, ch, ilms, input); \
             s->channel_residues[ch][icoef] = input; \
         } \
@@ -931,6 +933,8 @@ static int decode_subframe(WmallDecodeCtx *s)
             s->do_lpc = 0;
     }
 
+    if (get_bits_left(&s->gb) < 1)
+        return AVERROR_INVALIDDATA;
 
     if (get_bits1(&s->gb))
         padding_zeroes = get_bits(&s->gb, 5);
@@ -1157,14 +1161,14 @@ static void save_bits(WmallDecodeCtx *s, GetBitContext* gb, int len,
 
     s->num_saved_bits += len;
     if (!append) {
-        avpriv_copy_bits(&s->pb, gb->buffer + (get_bits_count(gb) >> 3),
+        ff_copy_bits(&s->pb, gb->buffer + (get_bits_count(gb) >> 3),
                          s->num_saved_bits);
     } else {
         int align = 8 - (get_bits_count(gb) & 7);
         align = FFMIN(align, len);
         put_bits(&s->pb, align, get_bits(gb, align));
         len -= align;
-        avpriv_copy_bits(&s->pb, gb->buffer + (get_bits_count(gb) >> 3), len);
+        ff_copy_bits(&s->pb, gb->buffer + (get_bits_count(gb) >> 3), len);
     }
     skip_bits_long(gb, len);
 
@@ -1319,7 +1323,7 @@ static av_cold int decode_close(AVCodecContext *avctx)
     return 0;
 }
 
-AVCodec ff_wmalossless_decoder = {
+const AVCodec ff_wmalossless_decoder = {
     .name           = "wmalossless",
     .long_name      = NULL_IF_CONFIG_SMALL("Windows Media Audio Lossless"),
     .type           = AVMEDIA_TYPE_AUDIO,
@@ -1330,7 +1334,7 @@ AVCodec ff_wmalossless_decoder = {
     .decode         = decode_packet,
     .flush          = flush,
     .capabilities   = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
     .sample_fmts    = (const enum AVSampleFormat[]) { AV_SAMPLE_FMT_S16P,
                                                       AV_SAMPLE_FMT_S32P,
                                                       AV_SAMPLE_FMT_NONE },
